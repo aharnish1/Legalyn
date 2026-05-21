@@ -1,16 +1,39 @@
-require('dotenv').config();
+// Global crash handlers — must be at the very top
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT EXCEPTION:', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('UNHANDLED REJECTION:', reason);
+});
+
+// Safe dotenv — silent fail if no .env file (production on Render uses dashboard vars)
+try {
+  require('dotenv').config();
+} catch (err) {
+  console.warn('dotenv: No .env file found, using environment variables.');
+}
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const morgan = require('morgan');
 const path = require('path');
+const fs = require('fs');
 const connectDB = require('./config/db');
 const checkEnvironment = require('./utils/envChecker');
 const resp = require('./utils/responseHelper');
 
 // Validate environment before starting
 checkEnvironment();
+
+// Ensure uploads directory exists (production-safe)
+const uploadDir = process.env.UPLOAD_PATH || 'uploads/';
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+  console.log(`Created uploads directory: ${uploadDir}`);
+}
 
 const app = express();
 
@@ -106,51 +129,50 @@ app.use((err, req, res, _next) => {
 // Start server
 const PORT = process.env.PORT || 5000;
 
-// Connect to MongoDB then start listening
-connectDB().then(() => {
-  const server = app.listen(PORT, () => {
-    console.log('='.repeat(50));
-    console.log(`Legalyn API Server`);
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`Port: ${PORT}`);
-    console.log(`Client URL: ${process.env.CLIENT_URL}`);
-    console.log('='.repeat(50));
-  });
+async function startServer() {
+  try {
+    console.log('Connecting to MongoDB...');
+    await connectDB();
+    console.log('MongoDB connected successfully.');
 
-  // Increase server timeout for long AI operations
-  server.timeout = 180000;
-
-  // Graceful shutdown
-  const shutdown = async (signal) => {
-    console.log(`\n${signal} received. Shutting down gracefully...`);
-    server.close(() => {
-      console.log('HTTP server closed.');
-      process.exit(0);
+    const server = app.listen(PORT, () => {
+      console.log('');
+      console.log('='.repeat(54));
+      console.log('  Legalyn API Server');
+      console.log('  Environment: ' + (process.env.NODE_ENV || 'development'));
+      console.log('  Port:        ' + PORT);
+      console.log('  Client URL:  ' + process.env.CLIENT_URL);
+      console.log('  OpenRouter:  ' + (process.env.OPENROUTER_API_KEY ? 'configured' : 'MISSING'));
+      console.log('='.repeat(54));
+      console.log('');
     });
 
-    // Force shutdown after 10s
-    setTimeout(() => {
-      console.error('Forced shutdown after timeout.');
-      process.exit(1);
-    }, 10000);
-  };
+    // Increase server timeout for long AI operations
+    server.timeout = 180000;
 
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+    // Graceful shutdown
+    const shutdown = async (signal) => {
+      console.log(`\n${signal} received. Shutting down gracefully...`);
+      server.close(() => {
+        console.log('HTTP server closed.');
+        process.exit(0);
+      });
 
-  // Handle unhandled promise rejections
-  process.on('unhandledRejection', (reason) => {
-    console.error('Unhandled Rejection:', reason);
-  });
+      // Force shutdown after 10s
+      setTimeout(() => {
+        console.error('Forced shutdown after timeout.');
+        process.exit(1);
+      }, 10000);
+    };
 
-  // Handle uncaught exceptions
-  process.on('uncaughtException', (error) => {
-    console.error('Uncaught Exception:', error);
-    shutdown('UNCAUGHT_EXCEPTION');
-  });
-}).catch((err) => {
-  console.error('Failed to connect to MongoDB:', err.message);
-  process.exit(1);
-});
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
+  } catch (err) {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  }
+}
+
+startServer();
 
 module.exports = app;

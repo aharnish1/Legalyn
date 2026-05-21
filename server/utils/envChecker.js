@@ -6,7 +6,7 @@ const REQUIRED_VARS = [
 
 const OPTIONAL_VARS = [
   { name: 'PORT', default: '5000' },
-  { name: 'CLIENT_URL', default: process.env.CLIENT_URL },
+  { name: 'CLIENT_URL', default: 'http://localhost:5173' },
   { name: 'NODE_ENV', default: 'development' },
   { name: 'UPLOAD_PATH', default: 'uploads/' }
 ];
@@ -29,19 +29,24 @@ function checkEnvironment() {
   }
 
   if (missing.length > 0) {
-    console.error('FATAL: Missing required environment variables:');
-    missing.forEach(v => console.error(`  - ${v}`));
-    console.error('Please set these in your .env file or environment.');
+    console.error('='.repeat(54));
+    console.error('  FATAL: Missing required environment variables:');
+    missing.forEach(v => console.error('    - ' + v));
+    console.error('='.repeat(54));
+    console.error('');
+    console.error('  Set these in your Render dashboard Environment Variables');
+    console.error('  or in the .env file for local development.');
+    console.error('');
     process.exit(1);
   }
 
   if (warnings.length > 0) {
     console.warn('Environment warnings:');
-    warnings.forEach(w => console.warn(`  - ${w}`));
+    warnings.forEach(w => console.warn('  - ' + w));
   }
 
   // Validate JWT_SECRET strength
-  if (process.env.JWT_SECRET.length < 10) {
+  if (process.env.JWT_SECRET && process.env.JWT_SECRET.length < 10) {
     console.warn('  - WARNING: JWT_SECRET is too short. Use a stronger secret in production.');
   }
 

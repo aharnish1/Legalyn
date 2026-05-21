@@ -29,15 +29,16 @@ function checkEnvironment() {
   }
 
   if (missing.length > 0) {
+    console.error('');
     console.error('='.repeat(54));
-    console.error('  FATAL: Missing required environment variables:');
+    console.error('  MISSING REQUIRED ENVIRONMENT VARIABLES:');
     missing.forEach(v => console.error('    - ' + v));
     console.error('='.repeat(54));
     console.error('');
-    console.error('  Set these in your Render dashboard Environment Variables');
-    console.error('  or in the .env file for local development.');
+    console.error('  Set these in your Render dashboard or .env file.');
+    console.error('  Server will start, but features requiring these will fail.');
     console.error('');
-    process.exit(1);
+    // Do NOT exit — server starts without DB; retry handles it later
   }
 
   if (warnings.length > 0) {

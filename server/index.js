@@ -1,7 +1,7 @@
-// Global crash handlers — must be at the very top
+// Global crash handlers — must be at the very top (never silent crash)
 process.on('uncaughtException', (err) => {
   console.error('UNCAUGHT EXCEPTION:', err);
-  process.exit(1);
+  // Don't exit — let the server attempt to recover or keep running
 });
 process.on('unhandledRejection', (reason) => {
   console.error('UNHANDLED REJECTION:', reason);
@@ -19,9 +19,10 @@ const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const morgan = require('morgan');
+const mongoose = require('mongoose');
 const path = require('path');
 const fs = require('fs');
-const connectDB = require('./config/db');
+const connectWithRetry = require('./config/db');
 const checkEnvironment = require('./utils/envChecker');
 const resp = require('./utils/responseHelper');
 
@@ -46,9 +47,10 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false
 }));
 
-// CORS
+// CORS — origin always from env, never hardcoded
+const allowedOrigin = process.env.CLIENT_URL || 'http://localhost:5173';
 app.use(cors({
-  origin: process.env.CLIENT_URL,
+  origin: allowedOrigin,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -74,7 +76,8 @@ app.get('/api/health', (req, res) => {
     message: 'Server is running',
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    mongodb: mongoose && mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
   });
 });
 
@@ -126,53 +129,63 @@ app.use((err, req, res, _next) => {
   resp.error(res, 'Internal server error', err, statusCode);
 });
 
-// Start server
+// ──────────────────────────────────────────────
+// START SERVER (does NOT wait for MongoDB)
+// ──────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 
-async function startServer() {
-  try {
-    console.log('Connecting to MongoDB...');
-    await connectDB();
-    console.log('MongoDB connected successfully.');
+const server = app.listen(PORT, () => {
+  console.log('');
+  console.log('='.repeat(54));
+  console.log('  Legalyn API Server');
+  console.log('  Environment: ' + (process.env.NODE_ENV || 'development'));
+  console.log('  Port:        ' + PORT);
+  console.log('  Client URL:  ' + process.env.CLIENT_URL);
+  console.log('  CORS Origin: ' + allowedOrigin);
+  console.log('');
+  console.log('  Environment variable status:');
+  console.log('    MONGODB_URI:      ' + (process.env.MONGODB_URI ? '✅ configured' : '❌ MISSING'));
+  console.log('    JWT_SECRET:      ' + (process.env.JWT_SECRET ? '✅ configured' : '❌ MISSING'));
+  console.log('    OPENROUTER_KEY:  ' + (process.env.OPENROUTER_API_KEY ? '✅ configured' : '❌ MISSING'));
+  console.log('');
+  console.log('='.repeat(54));
+  console.log('');
+});
 
-    const server = app.listen(PORT, () => {
-      console.log('');
-      console.log('='.repeat(54));
-      console.log('  Legalyn API Server');
-      console.log('  Environment: ' + (process.env.NODE_ENV || 'development'));
-      console.log('  Port:        ' + PORT);
-      console.log('  Client URL:  ' + process.env.CLIENT_URL);
-      console.log('  OpenRouter:  ' + (process.env.OPENROUTER_API_KEY ? 'configured' : 'MISSING'));
-      console.log('='.repeat(54));
-      console.log('');
-    });
+// Increase server timeout for long AI operations
+server.timeout = 180000;
 
-    // Increase server timeout for long AI operations
-    server.timeout = 180000;
-
-    // Graceful shutdown
-    const shutdown = async (signal) => {
-      console.log(`\n${signal} received. Shutting down gracefully...`);
-      server.close(() => {
-        console.log('HTTP server closed.');
-        process.exit(0);
-      });
-
-      // Force shutdown after 10s
-      setTimeout(() => {
-        console.error('Forced shutdown after timeout.');
-        process.exit(1);
-      }, 10000);
-    };
-
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
-  } catch (err) {
-    console.error('Failed to start server:', err);
-    process.exit(1);
+// ──────────────────────────────────────────────
+// MONGODB — connect with retry, never crash
+// ──────────────────────────────────────────────
+console.log('Starting MongoDB connection (with retry)...');
+connectWithRetry().then((conn) => {
+  if (conn) {
+    console.log('MongoDB connection established. All systems ready.');
+  } else {
+    console.warn('MongoDB connection pending — server running without database.');
+    console.warn('Routes that require the database will return errors until connected.');
   }
-}
+});
 
-startServer();
+// ──────────────────────────────────────────────
+// GRACEFUL SHUTDOWN
+// ──────────────────────────────────────────────
+const shutdown = async (signal) => {
+  console.log(`\n${signal} received. Shutting down gracefully...`);
+  server.close(() => {
+    console.log('HTTP server closed.');
+    process.exit(0);
+  });
+
+  // Force shutdown after 10s
+  setTimeout(() => {
+    console.error('Forced shutdown after timeout.');
+    process.exit(1);
+  }, 10000);
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 module.exports = app;

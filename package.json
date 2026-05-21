@@ -1,0 +1,16 @@
+{
+  "name": "legalyn",
+  "version": "1.0.0",
+  "description": "Legalyn - Understand Before You Sign",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "server": "cd server && npm run dev",
+    "client": "cd client && npm run dev",
+    "dev": "npm run server & npm run client",
+    "install-all": "cd server && npm install && cd ../client && npm install"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
